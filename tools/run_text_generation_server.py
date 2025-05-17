@@ -207,7 +207,6 @@ if __name__ == "__main__":
         load_context = fp8_model_init()
     with load_context:
         model = get_model(model_provider, wrap_with_ddp=False)
-
     if args.load is not None:
         _ = load_checkpoint(model, None, None)
 
@@ -222,8 +221,10 @@ if __name__ == "__main__":
         inference_engine.generate(
             prompts=["Test prompt"], sampling_params=SamplingParams(num_tokens_to_generate=10)
         )
-
-    if mpu.is_pipeline_first_stage() and mpu.get_tensor_model_parallel_rank() == 0:
+    # [modified]
+    print(   mpu.get_all_ranks())
+    print(f"EP {mpu.get_expert_model_parallel_rank()} DP {mpu.get_data_parallel_rank()}")
+    if mpu.is_pipeline_first_stage() and mpu.get_tensor_model_parallel_rank() == 0 and mpu.get_expert_model_parallel_rank() == 0:
         server = MegatronServer(inference_engine, args)
         server.run("0.0.0.0", port=args.port)
 

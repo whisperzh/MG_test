@@ -53,6 +53,7 @@ def load_args_from_checkpoint(args):
     args.ffn_hidden_size = mixtral_config.intermediate_size
     args.num_experts = mixtral_config.num_local_experts
     args.sequence_parallel = True
+    # [modified]
     args.apply_rope_fusion = False
     args.gradient_accumulation_fusion = False
     if mixtral_config.num_key_value_heads:
@@ -266,6 +267,7 @@ def _load_checkpoint(queue, args):
     md.consumed_train_samples = 0
     md.consumed_valid_samples = 0
     md.num_experts = margs.num_experts
+    # [modified]
     md.qkv_bias =  False
     # Get first pipe stage.
     mpu.set_tensor_model_parallel_rank(0)

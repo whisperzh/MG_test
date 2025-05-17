@@ -1,8 +1,8 @@
 import torch
 import os
-
+# this is only for mixtral
 from collections import OrderedDict
-root_dir  = "/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP1PP1EP4Layer1"
+root_dir  = "/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP1PP4EP1Layer1"
 target_name = 'model_optim_rng.pt'
 if not os.path.exists(root_dir):
     print(f"not exist: {root_dir}")

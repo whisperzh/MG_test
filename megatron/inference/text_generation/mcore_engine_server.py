@@ -91,7 +91,7 @@ def run_mcore_engine(
         requests.append(req)
 
     result = engine.generate(inference_requests=requests)
-
+    
     # Only post-process on first stage.
     if mpu.is_pipeline_first_stage():
         response_dict = {"text": [x.prompt + x.generated_text for x in result]}

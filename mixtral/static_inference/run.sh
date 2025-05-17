@@ -1,16 +1,15 @@
-export MOE_TIME=1
+export MOE_TIME=0
 export IDEAL=0
-DISTRIBUTED_ARGS="--nproc_per_node 4 \
-                  --nnodes 1 \
-                  --node_rank 0 \
-                  --master_addr localhost \
-                  --master_port 6000"
+DISTRIBUTED_ARGS="--nproc_per_node 4"
+                #   --nnodes 1 \
+                #   --node_rank 0 \
+                #   --master_addr localhost \
+                #   --master_port 6000"
 CHECKPOINT="/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP1PP1EP4Layer1"
 TOKENIZER_MODEL=/home/ec2-user/CodeSpace/Megatron-LM/ckp/tokenizer.model
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-torchrun $DISTRIBUTED_ARGS ../tools/run_text_generation_server.py   \
-       --port 5000 \
+torchrun $DISTRIBUTED_ARGS ./gpt_static_inference.py    \
        --tensor-model-parallel-size 1  \
        --pipeline-model-parallel-size 1  \
        --expert-model-parallel-size 4 \
@@ -43,4 +42,9 @@ torchrun $DISTRIBUTED_ARGS ../tools/run_text_generation_server.py   \
        --no-rope-fusion \
        --no-gradient-accumulation-fusion \
        --max-batch-size 8 \
-       --inference-max-seq-length 32768
+       --inference-max-seq-length 32768 \
+       --prompts "prompt one " "sample prompt two" "sample prompt 3 hi hi hi hi" "this is me" \
+       --num-tokens-to-generate 1 \
+       
+ 
+
