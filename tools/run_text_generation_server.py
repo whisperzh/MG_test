@@ -208,6 +208,7 @@ if __name__ == "__main__":
     with load_context:
         model = get_model(model_provider, wrap_with_ddp=False)
     if args.load is not None:
+        print("Load weight ...")
         _ = load_checkpoint(model, None, None)
 
     assert len(model) == 1, "Above condition should have caught this"

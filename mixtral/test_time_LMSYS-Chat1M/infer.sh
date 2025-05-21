@@ -1,9 +1,9 @@
-export DBUG=1
+export DEBUG=1
 export MOE_TIME=1
 export IDEAL=0
 export SKEW=1
 LOG_FILE="moe_infer_ideal${IDEAL}_skew${SKEW}.log"
-echo "DBUG=$DBUG"
+echo "DEBUG=$DEBUG"
 echo "MOE_TIME=$MOE_TIME"
 echo "IDEAL=$IDEAL"
 echo "SKEW=$SKEW"

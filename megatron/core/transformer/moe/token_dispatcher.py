@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
-
+import os
 import torch
 
 from megatron.core.parallel_state import (
@@ -300,10 +300,11 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         assert (
             len(self.local_expert_indices) == self.num_local_experts
         ), "Invalid local expert indices"
-        for i in range(len(self.local_expert_indices) - 1):
-            assert (
-                self.local_expert_indices[i] == self.local_expert_indices[i + 1] - 1
-            ), "local_expert_indices must be continous"
+        if int(os.getenv("EPLB", "0")) == 0:
+            for i in range(len(self.local_expert_indices) - 1):
+                assert (
+                    self.local_expert_indices[i] == self.local_expert_indices[i + 1] - 1
+                ), "local_expert_indices must be continous"
 
         # [ep_size]. Represents the number of tokens sent by the current rank to other
         # EP ranks.
@@ -430,9 +431,15 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 .transpose(0, 1)
             )
             # [tp_size, ep_size, num_experts] -> [tp_size, ep_size, num_local_experts]
-            num_global_tokens_per_local_expert = num_global_tokens_per_expert[
-                :, :, self.local_expert_indices[0] : self.local_expert_indices[-1] + 1
-            ].contiguous()
+            if int(os.getenv("EPLB", "0")) == 0:
+                num_global_tokens_per_local_expert = num_global_tokens_per_expert[
+                    :, :, self.local_expert_indices[0] : self.local_expert_indices[-1] + 1
+                ].contiguous()
+            else:
+                indices = torch.tensor(self.local_expert_indices, device=num_global_tokens_per_expert.device)
+                num_global_tokens_per_local_expert = torch.index_select(
+                        num_global_tokens_per_expert, dim=2, index=indices
+                    ).contiguous()
             # [tp_size, ep_size, num_local_experts] -> [tp_size, ep_size]
             num_global_tokens_per_rank = num_global_tokens_per_local_expert.sum(axis=2)
             # [tp_size, ep_size] -> [ep_size]

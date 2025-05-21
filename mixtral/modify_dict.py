@@ -1,8 +1,13 @@
 import torch
 import os
+import argparse
+parser = argparse.ArgumentParser(description='Modify model checkpoint file paths.')
+parser.add_argument('--root_dir', type=str, required=True, help='Root directory containing model files')
+args = parser.parse_args()
+root_dir = args.root_dir
 # this is only for mixtral
 from collections import OrderedDict
-root_dir  = "/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP1PP4EP1Layer1"
+root_dir = args.root_dir
 target_name = 'model_optim_rng.pt'
 if not os.path.exists(root_dir):
     print(f"not exist: {root_dir}")

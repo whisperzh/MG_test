@@ -1375,7 +1375,10 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
     strict = False if args.retro_add_retriever else strict
     if not skip_load_to_model_and_opt:
         if len(ddp_model) == 1:
-            ddp_model[0].load_state_dict(state_dict['model'], strict=strict)
+            if int(os.getenv("EPLB", "0")) == 1 or int(os.getenv("REPLICATE", "0")) == 1 :
+                ddp_model[0].load_state_dict(state_dict['model'], strict=False)
+            else:
+                ddp_model[0].load_state_dict(state_dict['model'], strict=strict)
         else:
             for i in range(len(ddp_model)):
                 mpu.set_virtual_pipeline_model_parallel_rank(i)

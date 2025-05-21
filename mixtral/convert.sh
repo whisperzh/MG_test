@@ -1,14 +1,16 @@
+export DEBUG=0
 TOKENIZER_MODEL=/home/ec2-user/CodeSpace/download/models/Mixtral-8x7B-v0.1/tokenizer.model
 MEGATRON_PATH=/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0
 export PYTHONPATH=$MEGATRON_PATH:$PYTHONPATH
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 TARGET_TP_SIZE="1"
-TARGET_EP_SIZE="1"
-TARGET_PP_SIZE="4"
+TARGET_EP_SIZE="4"
+TARGET_PP_SIZE="1"
  
 HF_FORMAT_DIR=/home/ec2-user/CodeSpace/download/models/Mixtral-8x7B-v0.1
 MEGATRON_FORMAT_DIR=/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP${TARGET_TP_SIZE}PP${TARGET_PP_SIZE}EP${TARGET_EP_SIZE}Layer1
+
 
 python ../tools/checkpoint/convert.py \
 --model-type GPT \
@@ -23,4 +25,9 @@ python ../tools/checkpoint/convert.py \
 --saver-transformer-impl transformer_engine \
  
  
- 
+if [ $? -eq 0 ]; then
+    echo "Modify key of weights: $MEGATRON_FORMAT_DIR"
+    python modify_dict.py --root_dir $MEGATRON_FORMAT_DIR
+else
+    echo "Conversion failed, skipping modify_dict.py."
+fi

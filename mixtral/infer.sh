@@ -1,5 +1,6 @@
 export MOE_TIME=1
 export IDEAL=0
+export DEBUG=1
 DISTRIBUTED_ARGS="--nproc_per_node 4 \
                   --nnodes 1 \
                   --node_rank 0 \
@@ -43,4 +44,6 @@ torchrun $DISTRIBUTED_ARGS ../tools/run_text_generation_server.py   \
        --no-rope-fusion \
        --no-gradient-accumulation-fusion \
        --max-batch-size 8 \
-       --inference-max-seq-length 32768
+       --inference-max-seq-length 32768 \
+       --transformer-impl transformer_engine  
+ 
