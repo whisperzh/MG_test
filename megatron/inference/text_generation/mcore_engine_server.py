@@ -1,7 +1,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
 from typing import Any, Dict, Iterable, List, Optional, Union
-
+from torch.distributed import get_rank
 from megatron.core import mpu
 from megatron.core.inference.inference_request import InferenceRequest
 from megatron.core.inference.model_inference_wrappers.gpt.gpt_inference_wrapper import (
@@ -65,7 +65,7 @@ def run_mcore_engine(
         return_log_probs=return_output_log_probs,
         num_tokens_to_generate=tokens_to_generate,
     )
-
+    
     context_tokens_tensor, context_length_tensor = tokenize_prompts(
         prompts=prompts, tokens_to_generate=tokens_to_generate, add_BOS=False, data_parallel=False
     )
@@ -79,7 +79,6 @@ def run_mcore_engine(
         engine.text_generation_controller.tokenizer.detokenize(prompt)
         for prompt in tokenized_prompts
     ]
-
     requests = []
     for i in range(len(tokenized_prompts)):
         req = InferenceRequest(

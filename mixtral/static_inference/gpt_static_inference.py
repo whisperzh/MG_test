@@ -57,14 +57,8 @@ from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import (
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 import megatron.legacy.model
 from megatron.core.models.gpt import GPTModel
-from megatron.training import pretrain
 from megatron.core.utils import StragglerDetector
 from megatron.core.transformer.spec_utils import import_module
-from megatron.training.utils import (
-    get_batch_on_this_cp_rank,
-    get_batch_on_this_tp_rank,
-    get_blend_and_blend_per_split,
-)
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -76,6 +70,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
 from megatron.core.transformer.transformer_block import TransformerBlockSubmodules
 
 from examples.inference.gpt.utils import add_common_inference_args, build_requests
+# copy from pretrain_gpt.py
 def model_provider(pre_process=True, post_process=True) -> Union[GPTModel, megatron.legacy.model.GPTModel]:
     """Builds the model.
 

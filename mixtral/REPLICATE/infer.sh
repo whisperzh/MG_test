@@ -4,7 +4,6 @@ export IDEAL=0
 export SKEW=0
 export EPLB=0
 export REPLICATE=1
-  
 
 LOG_FILE="moe_infer_ideal${IDEAL}_skew${SKEW}_replicate${REPLICATE}.log"
 echo "DEBUG=$DEBUG"
@@ -16,6 +15,10 @@ echo "EPLB = $EPLB"
 echo "REPLICATE = $REPLICATE"
 if [ "$IDEAL" -eq 1 ] && [ "$SKEW" -eq 1 ]; then
     echo "Error: IDEAL and SKEW cannot both be 1."
+    exit 1
+fi
+if [ "$EPLB" -eq 1 ] && [ "$REPLICATE" -eq 1 ]; then
+    echo "Error: EPLB and REPLICATE cannot both be 1."
     exit 1
 fi
 

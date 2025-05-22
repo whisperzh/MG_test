@@ -4,7 +4,7 @@ import asyncio
 import warnings
 from collections import OrderedDict
 from typing import AsyncGenerator, Dict, List, Optional, Union
-
+from torch.distributed import get_rank
 import torch
 from tqdm import tqdm
 
@@ -210,7 +210,7 @@ class StaticInferenceEngine(AbstractEngine):
                     active_requests, active_streams
                 )
             )
-
+            
             self.scheduler.update_requests_pools(result_dict=result_dict)
 
             crnt_num_requests_pending = self.scheduler.num_requests_pending()

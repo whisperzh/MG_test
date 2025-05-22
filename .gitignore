@@ -15,3 +15,5 @@ onelogger.err
 *.pt
 *.txt
 *.log
+mixtral/dynamic_inferecne/*
+mixtral/EPLB/weight.py

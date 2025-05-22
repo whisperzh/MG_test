@@ -426,6 +426,7 @@ class TextGenerationController:
 
         # Pad batch tokens if necessary
         batch_size = len(active_requests)
+        
         max_sequence_length = max_prompt_length_in_batch + sampling_params.num_tokens_to_generate
         inference_max_batch_size = (
             self.inference_wrapped_model.inference_wrapper_config.inference_max_requests
