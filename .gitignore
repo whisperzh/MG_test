@@ -17,3 +17,6 @@ onelogger.err
 *.log
 mixtral/dynamic_inferecne/*
 mixtral/EPLB/weight.py
+*.safetensors
+venv/
+
