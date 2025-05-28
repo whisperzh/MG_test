@@ -877,7 +877,12 @@ if is_te_min_version("1.9.0.dev0"):
             else:
                 tp_group = get_tensor_model_parallel_group(check_initialized=False)
                 tp_size = get_tensor_model_parallel_world_size()
-            self.explicit_expert_comm = is_expert and (tp_size > 1 or self.expert_parallel)
+            
+            if int(os.getenv("IN_CONTAINER", "0")) == 1:
+                self.explicit_expert_comm = is_expert
+                tp_size = 1 
+            else:
+                self.explicit_expert_comm = is_expert and (tp_size > 1 or self.expert_parallel)
 
             if self.explicit_expert_comm:
                 if parallel_mode == "column":
@@ -887,7 +892,7 @@ if is_te_min_version("1.9.0.dev0"):
                 parallel_mode = None
                 tp_size = 1
                 tp_group = None
-
+            print(f"num_gemms: {num_gemms}")
             super().__init__(
                 num_gemms=num_gemms,
                 in_features=input_size,
@@ -987,6 +992,8 @@ if is_te_min_version("1.9.0.dev0"):
             _is_first_microbatch = (
                 None if self.disable_parameter_transpose_cache else self.is_first_microbatch
             )
+            print(f"m_splits len:{len(m_splits)}")            
+            print(f"m_splits:{m_splits}")
             out = super().forward(x, m_splits, is_first_microbatch=_is_first_microbatch)
             self.is_first_microbatch = False
 

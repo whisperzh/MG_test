@@ -23,20 +23,20 @@ if [ "$EPLB" -eq 1 ] && [ "$REPLICATE" -eq 1 ]; then
 fi
 
 
-DISTRIBUTED_ARGS="--nproc_per_node 4 \
+DISTRIBUTED_ARGS="--nproc_per_node 2 \
                   --nnodes 1 \
                   --node_rank 0 \
                   --master_addr localhost \
                   --master_port 6000"
-CHECKPOINT="/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/mixtral-mcore-TP1PP1EP4Layer1"
-TOKENIZER_MODEL=/home/ec2-user/CodeSpace/Megatron-LM/ckp/tokenizer.model
+CHECKPOINT="/root/MG_test/mixtral/mixtral-mcore-TP1PP1EP2Layer1"
+TOKENIZER_MODEL=/root/MG_test/checkpoints/mixtral/tokenizer.model
 start_time=$(date +%s) 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 torchrun $DISTRIBUTED_ARGS ../../tools/run_text_generation_server.py   \
        --port 5000 \
        --tensor-model-parallel-size 1  \
        --pipeline-model-parallel-size 1  \
-       --expert-model-parallel-size 4 \
+       --expert-model-parallel-size 2 \
        --tokenizer-type Llama2Tokenizer \
        --tokenizer-model $TOKENIZER_MODEL \
        --use-mcore-models \
