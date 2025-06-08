@@ -21,3 +21,4 @@ mixtral/EPLB/weight.py
 venv/
 
 checkpoints/
+*.pickle

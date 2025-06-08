@@ -8,7 +8,15 @@ import transformers
 from tqdm import tqdm
 import types
 
-
+def check_sparsity(tensor):
+    total_elements = tensor.numel()
+    zero_count = (tensor == 0).sum().item()
+    sparsity = zero_count / total_elements
+    
+    print(f"  Zero count: {zero_count}")
+    print(f"  Total elements: {total_elements}")
+    print(f"  Sparsity: {sparsity:.4f}")
+    
 def add_arguments(parser):
     group = parser.add_argument_group(title='Mixtral HF loader.')
 
@@ -88,7 +96,9 @@ def set_attn_state(args, layer, hf_layer):
     num_querys_per_group = num_heads // num_query_groups
     dim = args.kv_channels
     assert num_heads % num_querys_per_group == 0
-
+    print("num_query_groups",num_query_groups)
+    print("dim",dim)
+    print("num_querys_per_group*dim", num_querys_per_group*dim)
     # Copy weights (re-order dimensions for Megatron).
     attn.linear_qkv.weight.data.copy_(torch.cat([
         hf_attn.q_proj.weight.reshape((num_query_groups, num_querys_per_group*dim, -1)),
@@ -125,6 +135,11 @@ def set_layer_state(args, model, hf_model, layer_idx):
     set_mlp_state(args, layer, hf_layer)
 
     layer.self_attention.linear_qkv.layer_norm_weight.data.copy_(hf_layer.input_layernorm.weight)
+    #  layer.self_attention.linear_qkv is TELayerNormColumnParallelLinear
+    print("layer.self_attention.linear_qkv")
+    for name, param in layer.self_attention.linear_qkv.named_parameters():
+        print(name, param.shape)
+
     layer.pre_mlp_layernorm.weight.data.copy_(hf_layer.post_attention_layernorm.weight)
 
 def load_checkpoint_to_model(args):
@@ -136,10 +151,12 @@ def load_checkpoint_to_model(args):
     # Load Huggingface model.
 
     hf_model = MixtralForCausalLM.from_pretrained(args.load, device_map="cpu")
-
+    print("hf model")
+    print(hf_model)
     # Init Megatron model.
     model = model_provider(True, True).to(args.params_dtype)
-
+    print("mg model")
+    print(model)
     # Set model state.
     set_preprocess_state(args, model, hf_model)
     set_postprocess_state(args, model, hf_model)
@@ -312,11 +329,14 @@ def _load_checkpoint(queue, args):
         message["router weight"] = layer.mlp.router.weight.data
         if md.swiglu:
             chunked_mlp_l0_weight =  [torch.chunk(local_expert.linear_fc1.weight.data, 2, dim=0) for local_expert in experts]
+           
             message["mlp l0 weight W"] = torch.stack([local_weight[0] for local_weight in chunked_mlp_l0_weight], dim=0)
             message["mlp l0 weight V"] = torch.stack([local_weight[1] for local_weight in chunked_mlp_l0_weight], dim=0)
         else:
             message["mlp l0 weight"] = torch.stack([local_expert.linear_fc1.weight.data for local_expert in experts])
         message["mlp l1 weight"] = torch.stack([local_expert.linear_fc2.weight.data for local_expert in experts], dim=0)
+        print("check_sparsity")
+        check_sparsity(message["mlp l1 weight"])
 
         queue_put(f"transformer layer {layer_idx}", message)
 
