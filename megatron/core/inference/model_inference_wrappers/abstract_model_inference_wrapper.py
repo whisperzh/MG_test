@@ -184,6 +184,7 @@ class AbstractModelInferenceWrapper(abc.ABC):
             torch.Tensor: The output logits of shape [batch_size, seq_len, padded_vocab_size]
         """
         tokens = inference_input["tokens"]
+        print(f"iter token length: {len(tokens)}")
         logits = self._forward(inference_input)
         logits = tensor_parallel.gather_from_tensor_model_parallel_region(logits)
         if self.inference_context.is_static_batching():

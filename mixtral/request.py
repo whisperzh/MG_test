@@ -7,12 +7,21 @@ import os
 from transformers import AutoTokenizer
  
 if __name__ == "__main__":
-    prompt =  "hi"
-    b = "this is a cat"
+    sys_prompt =  "How are you?"
+    # user_prompt = """
+    # Generate a detailed analysis of the impact of artificial intelligence on modern healthcare, covering at least five key areas such as diagnostics, treatment personalization,
+    # robotic surgery, drug discovery, and patient monitoring. Include real-world examples where AI has significantly improved outcomes, potential risks or ethical concerns, and 
+    # future trends. Additionally, compare the adoption rates of AI in healthcare between developed and developing nations, and suggest policy recommendations to bridge the gap. 
+    # The response should be well-structured, data-driven, and cite reputable sources if possible.
+    # """
+    
+    user_prompt="Hi"
+    
     url = "localhost:5000"
     url = 'http://' + url + '/api'
     headers = {'Content-Type': 'application/json'}
-    data = {"prompts":[prompt , b], "tokens_to_generate": 1}
+    data = {"prompts":[sys_prompt , user_prompt,"See you next time."], "tokens_to_generate": 4}
+    
     response = requests.put(url, data=json.dumps(data), headers=headers)
 
     if response.status_code != 200:

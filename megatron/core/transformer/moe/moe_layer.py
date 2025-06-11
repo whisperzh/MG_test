@@ -134,41 +134,10 @@ class MoELayer(BaseMoELayer):
             raise ValueError(
                 f"Unsupported token dispatcher type: {config.moe_token_dispatcher_type}"
             )
-            
-        LOAD_FROM_LOCAL = False
-        output_dir = f"saved_objects/rank_{get_rank()}"
-        output_file_submodules_experts = os.path.join(output_dir, "submodules_experts.pickle")
-        output_file_num_local_experts = os.path.join(output_dir, "num_local_experts.pickle")
-        output_file_config = os.path.join(output_dir, "config.pickle")
-
-
-        if LOAD_FROM_LOCAL:
-            
-            with open(output_file_submodules_experts, 'rb') as f:
-                self.submodules.experts = pickle.load(f)
-            with open(output_file_num_local_experts, 'rb') as f:
-                self.num_local_experts = pickle.load(f)
-            with open(output_file_config, 'rb') as f:
-                self.config = pickle.load(f)
-            
 
         # Initialize experts
         self.experts = build_module(self.submodules.experts, self.num_local_experts, self.config)
         
-        
-        # # Save to file
-        if not LOAD_FROM_LOCAL:
-            os.makedirs(output_dir, exist_ok=True)
-            
-            
-            with open(output_file_submodules_experts, 'wb') as f:
-                pickle.dump(self.submodules.experts, f)
-                
-            with open(output_file_num_local_experts, 'wb') as f:
-                pickle.dump(self.num_local_experts, f)
-                
-            with open(output_file_config, 'wb') as f:
-                pickle.dump(self.config, f)
             
         # Initialize shared experts
         if self.use_shared_expert:

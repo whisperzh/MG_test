@@ -992,8 +992,6 @@ if is_te_min_version("1.9.0.dev0"):
             _is_first_microbatch = (
                 None if self.disable_parameter_transpose_cache else self.is_first_microbatch
             )
-            print(f"m_splits len:{len(m_splits)}")            
-            print(f"m_splits:{m_splits}")
             out = super().forward(x, m_splits, is_first_microbatch=_is_first_microbatch)
             self.is_first_microbatch = False
 

@@ -96,10 +96,10 @@ def model_provider(
                 transformer_layer_spec = get_gpt_layer_local_spec(
                     args.num_experts, args.moe_grouped_gemm, args.qk_layernorm
                 )
-
         model = GPTModel(
             config=config,
             transformer_layer_spec=transformer_layer_spec,
+            # [modified]  original  vocab_size=args.padded_vocab_size,
             vocab_size=args.padded_vocab_size,
             max_sequence_length=args.max_position_embeddings,
             pre_process=pre_process,
@@ -223,8 +223,7 @@ if __name__ == "__main__":
             prompts=["Test prompt"], sampling_params=SamplingParams(num_tokens_to_generate=10)
         )
     # [modified]
-    print(   mpu.get_all_ranks())
-    print(f"EP {mpu.get_expert_model_parallel_rank()} DP {mpu.get_data_parallel_rank()}")
+    print(f"[RANK {torch.distributed.get_rank()}] EP: {mpu.get_expert_model_parallel_rank()}, DP: {mpu.get_data_parallel_rank()}, TP: {mpu.get_tensor_model_parallel_rank()}, PP: {mpu.get_pipeline_model_parallel_rank()}")
     if mpu.is_pipeline_first_stage() and mpu.get_tensor_model_parallel_rank() == 0 and mpu.get_expert_model_parallel_rank() == 0:
         server = MegatronServer(inference_engine, args)
         server.run("0.0.0.0", port=args.port)
