@@ -1,6 +1,6 @@
 export DEBUG=0
-TOKENIZER_MODEL=/root/MG_test/checkpoints/mixtral/tokenizer.model
-MEGATRON_PATH=/root/MG_test
+TOKENIZER_MODEL=/home/ubuntu/MG_test/checkpoints/tokenizer.model
+MEGATRON_PATH=/home/ubuntu/MG_test
 export PYTHONPATH=$MEGATRON_PATH:$PYTHONPATH
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
@@ -8,8 +8,8 @@ TARGET_TP_SIZE="1"
 TARGET_EP_SIZE="2"
 TARGET_PP_SIZE="1"
  
-HF_FORMAT_DIR=/root/MG_test/checkpoints/mixtral
-MEGATRON_FORMAT_DIR=/root/MG_test/mixtral/mixtral-mcore-TP${TARGET_TP_SIZE}PP${TARGET_PP_SIZE}EP${TARGET_EP_SIZE}Layer1_2
+HF_FORMAT_DIR=/home/ubuntu/MG_test/checkpoints/
+MEGATRON_FORMAT_DIR=/home/ubuntu/MG_test/mixtral/mixtral-mcore-TP${TARGET_TP_SIZE}PP${TARGET_PP_SIZE}EP${TARGET_EP_SIZE}Layer1_2
 
 
 python ../tools/checkpoint/convert.py \

@@ -225,6 +225,7 @@ if __name__ == "__main__":
     # [modified]
     print(f"[RANK {torch.distributed.get_rank()}] EP: {mpu.get_expert_model_parallel_rank()}, DP: {mpu.get_data_parallel_rank()}, TP: {mpu.get_tensor_model_parallel_rank()}, PP: {mpu.get_pipeline_model_parallel_rank()}")
     if mpu.is_pipeline_first_stage() and mpu.get_tensor_model_parallel_rank() == 0 and mpu.get_expert_model_parallel_rank() == 0:
+        print("Launching Server")
         server = MegatronServer(inference_engine, args)
         server.run("0.0.0.0", port=args.port)
 

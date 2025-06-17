@@ -373,8 +373,16 @@ class MoELayer(BaseMoELayer):
             (dispatched_input, tokens_per_expert) = self.token_dispatcher.token_permutation(
                 hidden_states, probs, routing_map
             )
+            print(f"probs:{probs}")
+            print(f"routing_map:{routing_map}")
+            print(f"dispatched_input:{dispatched_input.shape}")
+            print(f"tokens_per_expert:{tokens_per_expert}")
+            
             expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
             output, mlp_bias = self.token_dispatcher.token_unpermutation(expert_output, mlp_bias)
+            print(f"expert_output:{expert_output.shape}")
+            # print(f"mlp_bias:{mlp_bias.shape}")
+            
             if self.use_shared_expert and not self.shared_expert_overlap:
                 # if shared_expert_overlap is True, the expert calculation happens in
                 # the token_dispatcher to overlap communications and computations
@@ -395,10 +403,10 @@ class MoELayer(BaseMoELayer):
         #     torch.save(output, f"/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/REPLICATE/{get_rank()}.pt")
         # if int(os.getenv("REPLICATE", "0")) == 1:
         #     torch.save(output, f"/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/REPLICATE/{get_rank()}_REPLICATE.pt") 
-        if int(os.getenv("EPLB", "0")) == 0:
-            torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}.pt")
-        if int(os.getenv("EPLB", "0")) == 1:
-            torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}_EPLB.pt")
+        # if int(os.getenv("EPLB", "0")) == 0:
+        #     torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}.pt")
+        # if int(os.getenv("EPLB", "0")) == 1:
+        #     torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}_EPLB.pt")
         return output, mlp_bias
 
 def generate_balanced_routing_map(token_num, num_experts, topk,device):

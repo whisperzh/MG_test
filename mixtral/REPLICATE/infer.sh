@@ -3,7 +3,7 @@ export MOE_TIME=1
 export IDEAL=0
 export SKEW=0
 export EPLB=0
-export REPLICATE=1
+export REPLICATE=0
 
 LOG_FILE="moe_infer_ideal${IDEAL}_skew${SKEW}_replicate${REPLICATE}.log"
 echo "DEBUG=$DEBUG"
@@ -23,13 +23,13 @@ if [ "$EPLB" -eq 1 ] && [ "$REPLICATE" -eq 1 ]; then
 fi
 
 
-DISTRIBUTED_ARGS="--nproc_per_node 2 \
-                  --nnodes 1 \
+DISTRIBUTED_ARGS="--nproc_per_node 1 \
+                  --nnodes 2 \
                   --node_rank 0 \
-                  --master_addr localhost \
-                  --master_port 6000"
-CHECKPOINT="/root/MG_test/mixtral/mixtral-mcore-TP1PP1EP2Layer1"
-TOKENIZER_MODEL=/root/MG_test/checkpoints/mixtral/tokenizer.model
+                  --master_addr 18.223.115.253 \
+                  --master_port 11451"
+CHECKPOINT="/home/ubuntu/MG_test/mixtral/mixtral-mcore-TP1PP1EP2Layer1_2"
+TOKENIZER_MODEL=/home/ubuntu/MG_test/checkpoints/tokenizer.model
 start_time=$(date +%s) 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 torchrun $DISTRIBUTED_ARGS ../../tools/run_text_generation_server.py   \

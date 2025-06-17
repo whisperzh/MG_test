@@ -18,14 +18,14 @@ app = Flask(__name__)
 
 DEBUG = bool(os.environ.get("DEBUG", False))
 RANK = int(os.environ.get("RANK", 0))
-PATH_SAVEDOBJ = os.environ.get("PATH_SAVEDOBJ", "/root/MG_test/mixtral/REPLICATE/saved_objects")
-EXPERTS = list(os.environ.get("EXPERTS", [[0, 1, 2],[0, 1,2,3]]))
+PATH_SAVEDOBJ = os.environ.get("PATH_SAVEDOBJ", "/home/ubuntu/MG_test/mixtral/REPLICATE/saved_objects")
+EXPERTS = list(os.environ.get("EXPERTS", [[0, 1, 2],[0, 1, 2, 3]]))
 
 GPU_IDX = int(os.environ.get("GPU_IDX", 0))
 WARMUP = bool(os.environ.get("WARMUP", True))
 LAYER = list(os.environ.get("LAYER", [0, 1]))
-WEIGHT_PATH = os.environ.get("WEIGHT_PATH", "/root/MG_test/weights")
-##
+WEIGHT_PATH = os.environ.get("WEIGHT_PATH", "/home/ubuntu/MG_test/weights")
+
 
 rank0 = True
 checkpointing_context = None
@@ -138,6 +138,11 @@ def forward():
     latency_ms = start_event.elapsed_time(end_event)
 
     return jsonify({"hidden_output": output.cpu().tolist(), "latency_ms": latency_ms})
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    return jsonify({"message": "OK"})
+
 
 
 if __name__ == "__main__":
