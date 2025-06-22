@@ -1372,7 +1372,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
         print_rank_0('could not find arguments in the checkpoint ...')
 
     # Model.
-    strict = False if args.retro_add_retriever else strict
+    strict = False # if args.retro_add_retriever else strict
     if not skip_load_to_model_and_opt:
         if len(ddp_model) == 1:
             if int(os.getenv("EPLB", "0")) == 1 or int(os.getenv("REPLICATE", "0")) == 1 :

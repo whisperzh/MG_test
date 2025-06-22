@@ -27,7 +27,7 @@ from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 import json
 import pickle
-
+import requests
 
 @dataclass
 class MoESubmodules:
@@ -136,7 +136,8 @@ class MoELayer(BaseMoELayer):
             )
 
         # Initialize experts
-        self.experts = build_module(self.submodules.experts, self.num_local_experts, self.config)
+        if os.getenv("EXTERNAL_EXPERTS") == "0":
+            self.experts = build_module(self.submodules.experts, self.num_local_experts, self.config)
         
             
         # Initialize shared experts
@@ -378,9 +379,26 @@ class MoELayer(BaseMoELayer):
             print(f"dispatched_input:{dispatched_input.shape}")
             print(f"tokens_per_expert:{tokens_per_expert}")
             
-            expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
+            if os.getenv("EXTERNAL_EXPERTS") == "0":
+                expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
+            else:
+                url="http://localhost:8000/forward"
+
+                response = requests.post(
+                    url,
+                    json={
+                        'dispatched_input':dispatched_input.cpu().tolist(),
+                        'tokens_per_expert':tokens_per_expert.cpu().tolist(),
+                        'layer':'0'
+                        }  # 自动将字典转换为 JSON
+                )
+                
+                expert_output, mlp_bias = torch.tensor(response.json()["hidden_output"]).cuda(), None
+                print(f"expert_output:{expert_output.shape}")
+
+            
+            
             output, mlp_bias = self.token_dispatcher.token_unpermutation(expert_output, mlp_bias)
-            print(f"expert_output:{expert_output.shape}")
             # print(f"mlp_bias:{mlp_bias.shape}")
             
             if self.use_shared_expert and not self.shared_expert_overlap:

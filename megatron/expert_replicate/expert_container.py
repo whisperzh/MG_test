@@ -19,11 +19,11 @@ app = Flask(__name__)
 DEBUG = bool(os.environ.get("DEBUG", False))
 RANK = int(os.environ.get("RANK", 0))
 PATH_SAVEDOBJ = os.environ.get("PATH_SAVEDOBJ", "/home/ubuntu/MG_test/mixtral/REPLICATE/saved_objects")
-EXPERTS = list(os.environ.get("EXPERTS", [[0, 1, 2],[0, 1, 2, 3]]))
+EXPERTS = list(os.environ.get("EXPERTS", [[0, 1, 2,3]]))
 
 GPU_IDX = int(os.environ.get("GPU_IDX", 0))
 WARMUP = bool(os.environ.get("WARMUP", True))
-LAYER = list(os.environ.get("LAYER", [0, 1]))
+LAYER = list(os.environ.get("LAYER", [0]))
 WEIGHT_PATH = os.environ.get("WEIGHT_PATH", "/home/ubuntu/MG_test/weights")
 
 
@@ -149,4 +149,4 @@ if __name__ == "__main__":
     # assert False, "we got a big problem, different layer should be separated "
     if WARMUP and not DEBUG:
         _warmup()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=8000)
