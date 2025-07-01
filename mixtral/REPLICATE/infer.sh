@@ -4,6 +4,7 @@ export IDEAL=0
 export SKEW=0
 export EPLB=0
 export REPLICATE=0
+export EXTERNAL_EXPERTS=1
 
 LOG_FILE="moe_infer_ideal${IDEAL}_skew${SKEW}_replicate${REPLICATE}.log"
 echo "DEBUG=$DEBUG"

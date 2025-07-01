@@ -13,19 +13,18 @@ from megatron.core.transformer.moe.experts import TEGroupedMLP
 from megatron.core.extensions.transformer_engine import TEColumnParallelGroupedLinear, TERowParallelGroupedLinear
 from megatron.core.transformer.spec_utils import ModuleSpec
 import json
-
+import ast
 app = Flask(__name__)
 
 DEBUG = bool(os.environ.get("DEBUG", False))
 RANK = int(os.environ.get("RANK", 0))
 PATH_SAVEDOBJ = os.environ.get("PATH_SAVEDOBJ", "/home/ubuntu/MG_test/mixtral/REPLICATE/saved_objects")
-EXPERTS = list(os.environ.get("EXPERTS", [[0, 1, 2,3]]))
+EXPERTS = ast.literal_eval(os.environ.get("EXPERTS", [[0, 1, 2,3]]))
 
 GPU_IDX = int(os.environ.get("GPU_IDX", 0))
 WARMUP = bool(os.environ.get("WARMUP", True))
-LAYER = list(os.environ.get("LAYER", [0]))
+LAYER = ast.literal_eval(os.environ.get("LAYER", [0]))
 WEIGHT_PATH = os.environ.get("WEIGHT_PATH", "/home/ubuntu/MG_test/weights")
-
 
 rank0 = True
 checkpointing_context = None
@@ -55,8 +54,9 @@ def init_experts():
         return None
 
     experts = [build_module(submodules_experts, len(e), config) for e in EXPERTS]
-    for idx, e in enumerate(experts):
-        load_expert_weights(e, EXPERTS[idx], LAYER[idx])
+    for l in LAYER:
+        for idx,e in enumerate(experts):
+            load_expert_weights(e, EXPERTS[idx], l)
     return experts
 
 
@@ -69,7 +69,7 @@ def load_expert_weights(
     Load specific expert weights from checkpoint.
     """
 
-    for expert_idx in expert_indices:
+    for idx, expert_idx in enumerate(expert_indices):
         try:
             with torch.no_grad():
                 target_prefix_fc1 = f"decoder.layers.{layer}.mlp.experts.linear_fc1.weight{expert_idx}"
@@ -82,11 +82,11 @@ def load_expert_weights(
                 weight_fc2 = torch.load(path_fc2, weights_only=True).to(cuda_device)
                 
                 actual_expert_weight_fc1 = getattr(
-                    expert_model.linear_fc1, f"weight{expert_idx}")
+                    expert_model.linear_fc1, f"weight{idx}")
                 actual_expert_weight_fc1.data.copy_(weight_fc1)
 
                 actual_expert_weight_fc2 = getattr(
-                    expert_model.linear_fc2, f"weight{expert_idx}")
+                    expert_model.linear_fc2, f"weight{idx}")
                 actual_expert_weight_fc2.data.copy_(weight_fc2)
                     
         except Exception as e:
@@ -149,4 +149,4 @@ if __name__ == "__main__":
     # assert False, "we got a big problem, different layer should be separated "
     if WARMUP and not DEBUG:
         _warmup()
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=5000)
