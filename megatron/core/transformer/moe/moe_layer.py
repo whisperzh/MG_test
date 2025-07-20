@@ -136,8 +136,7 @@ class MoELayer(BaseMoELayer):
             )
 
         # Initialize experts
-        if os.getenv("EXTERNAL_EXPERTS") == "0":
-            self.experts = build_module(self.submodules.experts, self.num_local_experts, self.config)
+        self.experts = build_module(self.submodules.experts, self.num_local_experts, self.config)
         
             
         # Initialize shared experts
@@ -371,30 +370,47 @@ class MoELayer(BaseMoELayer):
                 torch.cuda.synchronize()
                 start_event.record()
             ##############################################################
+            
+            print(f"probs:{probs}")
+            print(f"routing_map:{routing_map}")
+            print(f"[Rank {rank}] before token_permutation")
             (dispatched_input, tokens_per_expert) = self.token_dispatcher.token_permutation(
                 hidden_states, probs, routing_map
             )
-            print(f"probs:{probs}")
-            print(f"routing_map:{routing_map}")
-            print(f"dispatched_input:{dispatched_input.shape}")
-            print(f"tokens_per_expert:{tokens_per_expert}")
             
+            print(f"[Rank {rank}] after token_permutation")
+
             if os.getenv("EXTERNAL_EXPERTS") == "0":
                 expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
             else:
-                url="http://localhost:8000/forward"
+                trunk_tokens, trunk_inputs= split_tokens_and_inputs(dispatched_input.clone(), tokens_per_expert.clone(),1 + int(os.getenv("EXTERNAL_EXPERTS", "1")))
+                
+                with open('trunk_tokens.pickle', 'wb') as f:  # 'wb' for write binary
+                    pickle.dump(trunk_tokens, f)
+                    
+                with open('trunk_inputs.pickle', 'wb') as f:  # 'wb' for write binary
+                    pickle.dump(trunk_inputs, f)
+                    
+                print(f"trunk_tokens[0] {trunk_tokens[0]},\ntrunk_inputs[0]: {trunk_inputs[0].shape}")
+                expert_output1, mlp_bias = self.experts(trunk_inputs[0], trunk_tokens[0])
+                # Save the object to a file
 
+                
+                url=f"http://{os.getenv("EXPERTS_ADDRESS", "")}:5001/forward"
+                print(f"url:{url}")
                 response = requests.post(
                     url,
                     json={
-                        'dispatched_input':dispatched_input.cpu().tolist(),
-                        'tokens_per_expert':tokens_per_expert.cpu().tolist(),
+                        'dispatched_input':trunk_inputs[1].cpu().tolist(),
+                        'tokens_per_expert':trunk_tokens[1].cpu().tolist(),
                         'layer':'0'
                         }  # 自动将字典转换为 JSON
                 )
                 
-                expert_output, mlp_bias = torch.tensor(response.json()["hidden_output"]).cuda(), None
-                print(f"expert_output:{expert_output.shape}")
+                expert_output2, mlp_bias = torch.tensor(response.json()["hidden_output"]).cuda(), None
+            
+                expert_output = torch.cat((expert_output1,expert_output2))
+            print(f"expert_output:{expert_output.shape}")
 
             
             
@@ -560,3 +576,35 @@ def load_expert_cpu(path,layer):
                 # print(f"{k} --> {new_key}", v.shape,v.device)
     # print(new_state.keys())
     return  new_state
+
+
+def split_tokens_and_inputs(dispatched_input, tokens_per_expert, world_size):
+    # Step 1: Split tokens_per_expert into trunks
+    trunk_tokens = []
+    
+    for _ in range(world_size):
+        trunk_tokens.append(torch.zeros_like(tokens_per_expert))
+    
+    for expert_idx, num_tokens in enumerate(trunk_tokens):
+        if expert_idx<len(trunk_tokens)-1:
+            trunk_tokens[expert_idx].copy_(tokens_per_expert//world_size) 
+        else:
+            trunk_tokens[expert_idx].copy_(torch.ceil(tokens_per_expert / world_size)) 
+            
+       
+    # Step 2: Split dispatched_input into trunks
+    trunk_inputs = [[] for _ in range(world_size)]
+    current_idx = 0
+    
+    for expert_idx, num_tokens in enumerate(tokens_per_expert):
+        if num_tokens == 0:
+            continue   
+        for trunk_idx in range(world_size):
+            assign = trunk_tokens[trunk_idx][expert_idx]
+            trunk_inputs[trunk_idx].append(dispatched_input[current_idx:current_idx+assign])
+            current_idx += assign
+    
+    # Concatenate each trunk's inputs
+    trunk_inputs = [torch.cat(inputs) for inputs in trunk_inputs]
+    
+    return trunk_tokens, trunk_inputs

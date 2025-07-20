@@ -28,4 +28,4 @@ if __name__ == "__main__":
         print(f"Error {response.status_code}: {response.json()['message']}")
     else:
         print("Megatron Response: ")
-        print(response.json()['text'][0])
+        print(response.json())

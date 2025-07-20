@@ -5,6 +5,8 @@ export SKEW=0
 export EPLB=0
 export REPLICATE=0
 export EXTERNAL_EXPERTS=1
+export EXPERTS_COPY=1
+export EXPERTS_ADDRESS=localhost
 
 LOG_FILE="moe_infer_ideal${IDEAL}_skew${SKEW}_replicate${REPLICATE}.log"
 echo "DEBUG=$DEBUG"
@@ -22,12 +24,12 @@ if [ "$EPLB" -eq 1 ] && [ "$REPLICATE" -eq 1 ]; then
     echo "Error: EPLB and REPLICATE cannot both be 1."
     exit 1
 fi
-
+ 
 
 DISTRIBUTED_ARGS="--nproc_per_node 1 \
                   --nnodes 2 \
                   --node_rank 0 \
-                  --master_addr 18.223.115.253 \
+                  --master_addr 3.22.101.142 \
                   --master_port 11451"
 CHECKPOINT="/home/ubuntu/MG_test/mixtral/mixtral-mcore-TP1PP1EP2Layer1_2"
 TOKENIZER_MODEL=/home/ubuntu/MG_test/checkpoints/tokenizer.model
