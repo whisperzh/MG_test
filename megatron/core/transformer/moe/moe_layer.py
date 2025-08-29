@@ -1,8 +1,10 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
-
+import time
+from megatron.predictor.global_predictor_controller import   get_predictor_controller
+import base64
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Union,Dict,List
 import torch.distributed as dist
 from megatron.core import mpu
 from torch.distributed import get_rank
@@ -28,7 +30,15 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 import json
 import pickle
 import requests
-
+import struct
+from megatron.predictor.global_predictor_controller import set_predictor_controller,get_predictor_controller
+from concurrent.futures import ThreadPoolExecutor
+import ast
+from megatron.core.transformer.moe.tensor_utils_pybind import IPCHandleManager, tensor_restore_from_handler_pybind,merge_tensors_and_export_ipc_handle
+import socket
+from megatron.core.transformer.moe.util_transmission import pack_metadata, unpack_metadata, dtype_to_code, code_to_dtype
+# import aiohttp
+# import asyncio
 @dataclass
 class MoESubmodules:
     """MoE Layer Submodule spec"""
@@ -108,11 +118,14 @@ class MoELayer(BaseMoELayer):
         if int(os.getenv("EPLB", "0")) == 1:
             self.init_eplb()
             self.auxiliary_cpu_experts_weight = None
-           
-            
         if int(os.getenv("REPLICATE", "0")) == 1:
             # replciate on expert in each rank
             self.init_replicate()
+        if int(os.getenv("Async_Predict", "0")) == 1 and os.getenv("EXTERNAL_EXPERTS") == "1":
+            self.controller = None
+        if os.getenv("EXTERNAL_EXPERTS") == "1":
+            self.container_executor = ThreadPoolExecutor(max_workers=1)
+
         # Initialize token dispatcher
         if config.moe_token_dispatcher_type == "allgather":
             self.token_dispatcher = MoEAllGatherTokenDispatcher(
@@ -281,8 +294,35 @@ class MoELayer(BaseMoELayer):
         new_expert_weight = getattr(self.experts.linear_fc2, new_attr_name)
         old_expert_weight = getattr(self.experts.linear_fc2, old_attr_name)
         with torch.no_grad():
-            new_expert_weight.data.copy_(old_expert_weight.data)
+            new_expert_weight.data.copy_(old_expert_weight.data)            
+    def _call_container(self, url, handle, metadata_list, layer_id):
+        T2=time.time()
+        sock_path = "/home/ubuntu/Codespace/serverless-moe/sock/socket.sock"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(sock_path)
+
+        # Header: total metadata count (4 bytes)
+        header = struct.pack('I', len(metadata_list))
         
+        # Payload:
+        payload = header
+        payload += handle
+        payload += struct.pack('i', layer_id)
+        for md in metadata_list:
+            payload += pack_metadata(md)
+
+        s.sendall(payload)
+
+        # Receive: return handle + int + metadata
+        returned = s.recv(64 + 8 + 32)
+        handle_bytes = returned[:64]
+        result_double = struct.unpack('d', returned[64:72])[0]  # 8 bytes double
+        packed_metadata = unpack_metadata(returned[72:104])
+        T3=time.time()
+        
+        print(f"RANK[{dist.get_rank()}] Layer[{self.layer_number}] {'total time used in container':<25} {((T3 - T2) * 1000):>8.2f} ms")
+        return handle_bytes, result_double, packed_metadata
+            
     def forward(self, hidden_states: torch.Tensor):
         if (
             self.training
@@ -294,12 +334,14 @@ class MoELayer(BaseMoELayer):
                 "are enabled without also enabling sequence parallelism."
             )
         # process MoE
+        if dist.get_rank() == 0:
+            print("======================================")
         def custom_forward(hidden_states):
             rank = dist.get_rank()
             if int(os.getenv("DEBUG", "0")) == 1:
-                print(f"RANK[{rank}] : hidden_states.shape = {hidden_states.shape}")
-            if int(os.getenv("REPLICATE", "0")) == 1:
-                self.replicate_modify_weights()
+                print(f"RANK[{rank}] Layer[{self.layer_number}] hidden_states.shape = {hidden_states.shape}")
+            # if int(os.getenv("REPLICATE", "0")) == 1:
+            #     self.replicate_modify_weights()
             if int(os.getenv("EPLB", "0")) == 1:
                 if self.auxiliary_cpu_experts_weight == None:
                 # Preload all experts wight to CPU, to be used in reorganizeing experts
@@ -307,17 +349,17 @@ class MoELayer(BaseMoELayer):
                     print("self.layer_number",self.layer_number)
                     self.auxiliary_cpu_experts_weight = load_expert_cpu(path,self.layer_number)
             probs, routing_map = self.router(hidden_states)
-            
-            
+            print("probs",probs.shape, probs.dtype, "routing_map", routing_map.shape,routing_map.dtype )
             if int(os.getenv("IDEAL", "0")) == 1:
                 # create ideal routing_map
-                idel_routing_map,_ = generate_balanced_routing_map(
+                idel_routing_map,ideal_probs ,= generate_balanced_routing_map(
                     token_num = hidden_states.shape[0]*hidden_states.shape[1],
                     num_experts = self.config.num_moe_experts ,
                     topk = self.config.moe_router_topk,
                     device =  hidden_states.device 
                 )
                 routing_map = idel_routing_map
+                probs = ideal_probs
             if int(os.getenv("SKEW", "0")) == 1:
                 # create imbalanced routing_map
                 get_imbalanced_routing_map(
@@ -363,6 +405,8 @@ class MoELayer(BaseMoELayer):
                 # update probs, routing_map
                 routing_map = eplb_modify(self.original_global_expert_indices,self.new_global_expert_indices, routing_map)
                 probs = eplb_modify(self.original_global_expert_indices,self.new_global_expert_indices, probs)
+                
+            print(f"RANK[{dist.get_rank()}] Layer[{self.layer_number}] workload" , routing_map.sum(dim=0).long())
             ##############################################################
             if int(os.getenv("MOE_TIME", "0")) == 1:
                 start_event = torch.cuda.Event(enable_timing=True)
@@ -370,52 +414,105 @@ class MoELayer(BaseMoELayer):
                 torch.cuda.synchronize()
                 start_event.record()
             ##############################################################
-            
-            print(f"probs:{probs}")
-            print(f"routing_map:{routing_map}")
-            print(f"[Rank {rank}] before token_permutation")
             (dispatched_input, tokens_per_expert) = self.token_dispatcher.token_permutation(
                 hidden_states, probs, routing_map
-            )
-            
-            print(f"[Rank {rank}] after token_permutation")
+            ) 
+            # print(f"[Rank {rank}] after token_permutation")
 
             if os.getenv("EXTERNAL_EXPERTS") == "0":
                 expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
             else:
-                trunk_tokens, trunk_inputs= split_tokens_and_inputs(dispatched_input.clone(), tokens_per_expert.clone(),1 + int(os.getenv("EXTERNAL_EXPERTS", "1")))
+                if os.getenv("Async_Predict") == "1": 
+                    if self.controller == None:
+                        self.controller = get_predictor_controller()
+                    # every layer have different replicate plan
+                    expert_replica_count_per_index = self.controller.expert_replica_count_per_index_map[self.layer_number]
+                else:
+                    # default expert_replica_count_per_index
+                    # NOTE: This must match the expert indices initialized in this container.
+                    # For example, if container experts are [0,1,2,3], the result will be:
+                    # {0:1, 1:1, 2:1, 3:1}
+                    # every layer are the same by default
+                    CONFIG_PATH = os.environ.get("REPLICA_CONFIG")
+                    with open(os.path.join(CONFIG_PATH, "replica.json"), "r") as f:
+                        config = json.load(f)
+                    rank = dist.get_rank()
+                    rank_config = config["Container"][f"RANK{rank}"]
+                    EXPERTS = ast.literal_eval(rank_config["EXPERTS"])
+                    num_experts = len(EXPERTS[self.layer_number-1])
+                    expert_replica_count_per_index = {i:1 for i in range (num_experts)}
                 
-                with open('trunk_tokens.pickle', 'wb') as f:  # 'wb' for write binary
-                    pickle.dump(trunk_tokens, f)
+                print(f"RANK[{dist.get_rank()}] Layer[{self.layer_number}] expert_replica_count_per_index" ,expert_replica_count_per_index)
+                # If this rank has no assigned replicas, it will skip container execution
+                # (i.e., this rank does not need to launch expert computation)
+                if not expert_replica_count_per_index:
+                    print(f"RANK[{dist.get_rank()}] Layer[{self.layer_number}]: no replica")
+                    expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
+                else:
+                    start_split = time.time()
                     
-                with open('trunk_inputs.pickle', 'wb') as f:  # 'wb' for write binary
-                    pickle.dump(trunk_inputs, f)
                     
-                print(f"trunk_tokens[0] {trunk_tokens[0]},\ntrunk_inputs[0]: {trunk_inputs[0].shape}")
-                expert_output1, mlp_bias = self.experts(trunk_inputs[0], trunk_tokens[0])
-                # Save the object to a file
-
-                
-                url=f"http://{os.getenv("EXPERTS_ADDRESS", "")}:5001/forward"
-                print(f"url:{url}")
-                response = requests.post(
-                    url,
-                    json={
-                        'dispatched_input':trunk_inputs[1].cpu().tolist(),
-                        'tokens_per_expert':trunk_tokens[1].cpu().tolist(),
-                        'layer':'0'
-                        }  # 自动将字典转换为 JSON
-                )
-                
-                expert_output2, mlp_bias = torch.tensor(response.json()["hidden_output"]).cuda(), None
-            
-                expert_output = torch.cat((expert_output1,expert_output2))
-            print(f"expert_output:{expert_output.shape}")
-
-            
-            
+                    print(f"RANK[{dist.get_rank()}] Layer[{self.layer_number}]:" ,expert_replica_count_per_index)
+                    local_dispatched_input, local_tokens_per_expert, local_expert_indices,\
+                    container_dispatched_input, container_tokens_per_expert, container_expert_indices=split_dispatched_for_replicated_experts(
+                    dispatched_input,
+                    tokens_per_expert,
+                    expert_replica_count_per_index
+                    )
+                    end_split = time.time()
+                    print(f"RANK[{rank}] Layer[{self.layer_number}] Split dispatched_input: {(end_split - start_split) * 1000:.2f} ms")
+                    # TODO:  Serverful expert and container expert are currently executed sequentially.
+                    # This should be changed to run in parallel or asynchronously to improve performance.
+                    if self.ep_rank == 0:
+                        url = f"http://{os.getenv('EXPERTS_ADDRESS', '')}:5001/forward"
+                    elif self.ep_rank == 1:
+                        url = f"http://{os.getenv('EXPERTS_ADDRESS', '')}:5002/forward"
+                    else:
+                        raise ValueError(f"Unsupported expert parallel rank: {self.ep_rank}. Current test only supports ranks 0 and 1.")
+                    # print(f"url:{url}")
+                    handler, metadata_list = get_handler_and_tensor_metadata([container_dispatched_input,container_tokens_per_expert])
+                    start_container = time.time()
+                    # ==== 1. Launch asynchronous container call  ====
+                    T0 = time.time()
+                    container_future = self.container_executor.submit(
+                            self._call_container,
+                            url= url,
+                            handle=handler,
+                            metadata_list=metadata_list,
+                            layer_id=self.layer_number - 1
+                        )
+                    T1 = time.time()
+                    end_container = time.time()
+                    print(f"RANK[{rank}] Layer[{self.layer_number}] Call Container: {(end_container - start_container) * 1000:.2f} ms")
+                    # ==== 2. Run local expert computation in parallel  ====
+                    local_output, mlp_bias = self.experts(local_dispatched_input,local_tokens_per_expert )
+                    T2 = time.time()
+                    # ==== 3. Wait for container result (blocking happens here)  ====
+                    handler, latency_ms, metadata  = container_future.result()  # blocks only here
+                    T3 = time.time()
+                    
+                    # 4. 剩余部分是文件内容
+                    # handler = raw_data[4 + meta_length :]
+                    print(f"returned meta:{metadata}")
+                    metadata['dtype'] = str(metadata['dtype'])
+                    
+                    handle_manager = IPCHandleManager(handler, metadata['device'])
+                    container_output = tensor_restore_from_handler_pybind(handle_manager, metadata)
+                    # print(f"response output_tensor:{container_output}")
+                    print(f'RANK[{rank}] Layer[{self.layer_number}] Forward time in Container: {latency_ms} ms')
+                    # print(f"RANK[{rank}] Layer[{self.layer_number}] {'Async request time:':<25} {((T1 - T0) * 1000):>8.2f} ms")
+                    # print(f"RANK[{rank}] Layer[{self.layer_number}] {'Local forward time:':<25} {((T2 - T1) * 1000):>8.2f} ms")
+                    # ==== 4. Combine local and container expert outputs ====
+                    start_combine = time.time()
+                    expert_output =  combine_output(
+                        local_output,local_tokens_per_expert,local_expert_indices,
+                        container_output, container_tokens_per_expert, container_expert_indices
+                    )
+                    end_combine= time.time()
+                    print(f"RANK[{rank}] Layer[{self.layer_number}] Combine dispatched_input: {(end_combine - start_combine) * 1000:.2f} ms")
+                    # handle_manager.close_ipc_handle()
+            # ==== 5. Restore original token order ====
             output, mlp_bias = self.token_dispatcher.token_unpermutation(expert_output, mlp_bias)
-            # print(f"mlp_bias:{mlp_bias.shape}")
             
             if self.use_shared_expert and not self.shared_expert_overlap:
                 # if shared_expert_overlap is True, the expert calculation happens in
@@ -426,27 +523,20 @@ class MoELayer(BaseMoELayer):
                 end_event.record()
                 torch.cuda.synchronize()
                 elapsed = start_event.elapsed_time(end_event)
-                print(f"RANK[{rank}] moe layer elapsed {elapsed} ms\n",)
+                print(f"RANK[{rank}] Layer[{self.layer_number}] moe layer elapsed {elapsed} ms\n",)
             return output, mlp_bias
 
         if self.moe_layer_recompute:
             output, mlp_bias = tensor_parallel.checkpoint(custom_forward, False, hidden_states)
         else:
             output, mlp_bias = custom_forward(hidden_states)
-        # if int(os.getenv("REPLICATE", "0")) == 0:
-        #     torch.save(output, f"/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/REPLICATE/{get_rank()}.pt")
-        # if int(os.getenv("REPLICATE", "0")) == 1:
-        #     torch.save(output, f"/home/ec2-user/CodeSpace/NEW_Megatron/Megatron-LM-core_v0.12.0/mixtral/REPLICATE/{get_rank()}_REPLICATE.pt") 
-        # if int(os.getenv("EPLB", "0")) == 0:
-        #     torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}.pt")
-        # if int(os.getenv("EPLB", "0")) == 1:
-        #     torch.save(output, f"/root/MG_test/mixtral/EPLB/{get_rank()}_EPLB.pt")
         return output, mlp_bias
 
 def generate_balanced_routing_map(token_num, num_experts, topk,device):
     assert topk <= num_experts, "topk must be ≤ num_experts"
 
     routing_map = torch.zeros((token_num, num_experts), dtype=torch.bool)
+    routing_prob = torch.zeros((token_num, num_experts), dtype=torch.float32)
     expert_counts = np.zeros(num_experts, dtype=int)
 
     for i in range(token_num):
@@ -454,8 +544,10 @@ def generate_balanced_routing_map(token_num, num_experts, topk,device):
         topk_experts = np.argsort(expert_counts)[:topk]
         routing_map[i, topk_experts] = True
         expert_counts[topk_experts] += 1
+        routing_prob[i, topk_experts] = 1.0 / topk
     routing_map = routing_map.to(device)
-    return routing_map, expert_counts
+    routing_prob = routing_prob.to(device)
+    return routing_map, routing_prob,expert_counts
 def get_imbalanced_routing_map(routing_map: torch.Tensor, expert_id: int, enforce_row_count: int):
     # modify routing_map in-place
     token_num, num_experts = routing_map.shape
@@ -544,7 +636,7 @@ def replicate_modify(data: torch.Tensor, world: int, replicated_num:int, ) -> to
     ]
     # Step 3: concatenate all chunks back
     new_data = torch.cat(padded_chunks, dim=1)  # shape: [NUM, num_expert + world * replicated_num]
-     
+
     return new_data
 
 def load_expert_cpu(path,layer):
@@ -581,7 +673,7 @@ def load_expert_cpu(path,layer):
 def split_tokens_and_inputs(dispatched_input, tokens_per_expert, world_size):
     # Step 1: Split tokens_per_expert into trunks
     trunk_tokens = []
-    
+    print( f"[Rank {get_rank()}]","dispatched_input",dispatched_input.shape, "tokens_per_expert",tokens_per_expert )
     for _ in range(world_size):
         trunk_tokens.append(torch.zeros_like(tokens_per_expert))
     
@@ -590,8 +682,8 @@ def split_tokens_and_inputs(dispatched_input, tokens_per_expert, world_size):
             trunk_tokens[expert_idx].copy_(tokens_per_expert//world_size) 
         else:
             trunk_tokens[expert_idx].copy_(torch.ceil(tokens_per_expert / world_size)) 
-            
-       
+    print( f"[Rank {get_rank()}]","trunk_tokens",trunk_tokens,)
+    
     # Step 2: Split dispatched_input into trunks
     trunk_inputs = [[] for _ in range(world_size)]
     current_idx = 0
@@ -602,9 +694,169 @@ def split_tokens_and_inputs(dispatched_input, tokens_per_expert, world_size):
         for trunk_idx in range(world_size):
             assign = trunk_tokens[trunk_idx][expert_idx]
             trunk_inputs[trunk_idx].append(dispatched_input[current_idx:current_idx+assign])
+            print(f"[Rank {get_rank()}] expert_idx {expert_idx} trunk_idx {trunk_idx}",trunk_inputs[trunk_idx][-1].shape ,"\n")
             current_idx += assign
     
     # Concatenate each trunk's inputs
     trunk_inputs = [torch.cat(inputs) for inputs in trunk_inputs]
     
     return trunk_tokens, trunk_inputs
+
+def split_dispatched_for_replicated_experts(
+    dispatched_input: torch.Tensor,               
+    tokens_per_expert: torch.Tensor,              
+    expert_replica_count_per_index: Dict[int, int]     
+):
+    '''
+    dispatched_input [T, D]: The original input tokens assigned to all experts.
+    tokens_per_expert: Number of tokens assigned to each expert
+    expert_replica_count_per_index: {expert_id: num_container_replica}: Which experts are replicated and how many container replicas they have.
+    
+    '''
+    D = dispatched_input.shape[1]
+    E = tokens_per_expert.shape[0]
+    # Compute starting index for each expert's tokens in the flattened dispatched_input
+    start_indices = torch.cat([
+        torch.zeros(1, dtype=torch.long),
+        tokens_per_expert.cumsum(dim=0)[:-1]
+    ])  # shape: [E]
+    # print(start_indices)
+    
+    # Local expert input parts
+    local_parts = []
+    local_tokens_per_expert = torch.zeros(E, dtype=tokens_per_expert.dtype, device=tokens_per_expert.device)
+    local_expert_indices = list(range(E))
+    
+    # Container (replicated) expert input parts
+    container_parts = []
+    container_tokens_per_expert = []
+    container_expert_indices = []
+    
+    for expert_id in range(E):
+        num_tokens = tokens_per_expert[expert_id].item()
+        if num_tokens == 0:
+            local_tokens_per_expert[expert_id] = 0
+            if expert_id in expert_replica_count_per_index:
+                container_expert_indices += [expert_id]
+                container_tokens_per_expert += [0]
+            continue
+        # Slice input for current expert
+        start = start_indices[expert_id].item()
+        end = start + num_tokens
+        expert_input = dispatched_input[start:end]  # shape [num_tokens, D]
+        if expert_id in expert_replica_count_per_index:
+            num_container_expert = expert_replica_count_per_index[expert_id]
+            total_replica = 1 + num_container_expert  # local + container replicas
+            # Evenly split input tokens among all replicas
+            chunks = torch.tensor_split(expert_input, total_replica, dim=0)
+            # First chunk goes to the local expert
+            local_parts.append(chunks[0])                     
+            local_tokens_per_expert[expert_id] = chunks[0].shape[0]
+            # Remaining chunks go to container replicas
+            for chunk in chunks[1:]:
+                container_parts.append(chunk)              
+            container_expert_indices += ([expert_id] * num_container_expert)
+            container_tokens_per_expert += [ chunk.shape[0] for chunk in chunks[1:]]
+        else:
+            # Expert is not replicated
+            local_parts.append(expert_input)
+            local_tokens_per_expert[expert_id] = expert_input.shape[0]  
+    local_dispatched_input = torch.cat(local_parts, dim=0) if local_parts else torch.empty((0, D))
+    container_dispatched_input = torch.cat(container_parts, dim=0) if container_parts else torch.empty((0, D))
+    container_tokens_per_expert = torch.tensor(container_tokens_per_expert, dtype= tokens_per_expert.dtype, device=tokens_per_expert.device)
+    assert local_tokens_per_expert.sum() == local_dispatched_input.shape[0], \
+        f"Mismatch: local token sum {local_tokens_per_expert.sum().item()} != local dispatched_input size {local_dispatched_input.shape[0]}"
+    assert container_tokens_per_expert.sum() == container_dispatched_input.shape[0], \
+        f"Mismatch: container token sum {container_tokens_per_expert.sum().item()} != container dispatched_input size {container_dispatched_input.shape[0]}"
+    assert local_dispatched_input.shape[0] + container_dispatched_input.shape[0] == dispatched_input.shape[0], \
+        "Mismatch: combined token count does not equal total dispatched_input token count"
+    assert sum(expert_replica_count_per_index.values()) == len(container_expert_indices), \
+        f"Mismatch: number of container replicas {expert_replica_count_per_index.values()} != recorded container_expert_indices length {len(container_expert_indices)}"
+
+    return (local_dispatched_input, 
+            local_tokens_per_expert, 
+            local_expert_indices,
+            
+            container_dispatched_input.to("cuda"), 
+            container_tokens_per_expert.to("cuda"),
+            container_expert_indices)
+
+def combine_output(
+    local_output: torch.Tensor,
+    local_tokens_per_expert: torch.Tensor,
+    local_expert_indices: List[int],
+    container_output: torch.Tensor,
+    container_tokens_per_expert: torch.Tensor,  
+    container_expert_indices: torch.Tensor,
+):  
+    """
+    Construct the output by combining the outputs from local experts
+    and container (replicated) experts.
+    Args:
+        local_output (Tensor): [T1, D] The output computed by local experts.
+        local_tokens_per_expert (Tensor): [E], number of tokens handled by each local expert.
+        local_expert_indices (List[int]): Indices of local experts (typically range(E)).
+        
+        container_output (Tensor): [T2, D] The output computed by container replicas.
+        container_tokens_per_expert (Tensor): [R], number of tokens handled by each container replica.
+        container_expert_indices (Tensor): [R], expert index for each container replica out
+    """
+    D = local_output.shape[1]
+    E = len(local_expert_indices)
+    
+    # Initialize expert output buckets
+    expert_outputs = [[] for _ in range(E)]
+    # Assign slices of local_output to corresponding experts
+    local_offset = 0
+    for expert_id in range(E):
+        num_tokens = local_tokens_per_expert[expert_id].item()
+        if num_tokens > 0:
+            local_expert_output = local_output[local_offset: local_offset + num_tokens]
+            expert_outputs[expert_id].append(local_expert_output)
+            local_offset += num_tokens
+    # Assign slices of container_output to corresponding replicated experts
+    container_offset = 0
+    for i, expert_id in enumerate(container_expert_indices):
+        num_tokens = container_tokens_per_expert[i].item()
+        if num_tokens > 0:
+            container_expert_output = container_output[container_offset: container_offset + num_tokens]
+            expert_outputs[expert_id].append(container_expert_output)
+            container_offset += num_tokens
+    # Concatenate all expert outputs in expert ID order to recover original token layout
+    full_output = torch.cat([
+        torch.cat(parts, dim=0) if parts else torch.empty((0, D), device=local_output.device)
+        for parts in expert_outputs
+    ], dim=0)
+    return full_output
+
+
+def get_dtype_size(dtype):
+    """获取dtype的字节大小"""
+    return torch.tensor([], dtype=dtype).element_size()
+    
+
+def get_handler_and_tensor_metadata(tensors):
+
+    handler = merge_tensors_and_export_ipc_handle(tensors, tensors[0].device.index)
+    # completed preparing handler
+
+    max_dtype = max(tensors, key=lambda t: get_dtype_size(t.dtype)).dtype
+    max_dtype_size = get_dtype_size(max_dtype)
+    total_elements = 0
+    metadata = []
+    offset_bytes = 0
+    for tensor in tensors:
+        # 计算当前张量需要的元素数（考虑对齐）
+        tensor_bytes = tensor.numel() * get_dtype_size(tensor.dtype)
+        elements_needed = (tensor_bytes + max_dtype_size - 1) // max_dtype_size
+        shape = list(tensor.shape) + [0] * (3 - len(tensor.shape))
+        # 记录元数据
+        metadata.append({
+            'dtype': tensor.dtype,
+            'shape': tensor.shape,
+            'device': tensor.device.index,
+            'offset_bytes':offset_bytes
+        })
+        offset_bytes += tensor_bytes
+        total_elements += elements_needed
+    return handler, metadata

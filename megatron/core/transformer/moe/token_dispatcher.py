@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 import os
 import torch
+import pickle
 
 from megatron.core.parallel_state import (
     get_expert_model_parallel_group,
@@ -26,7 +27,7 @@ from megatron.core.transformer.moe.moe_utils import (
 )
 from megatron.core.transformer.moe.shared_experts import SharedExpertMLP
 from megatron.core.transformer.transformer_config import TransformerConfig
-
+from megatron.core.transformer.moe.rebuild_nccl_utils import ncclrebuildutils
 """ We use the following notation throughout this file:
      H: hidden size
      B: micro batch size
@@ -353,6 +354,9 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         self.cuda_dtoh_stream = torch.cuda.Stream()
 
         self.shared_experts = None
+        
+    def SMOE_set_ep_size(self,ep_size):
+        self.ep_size = ep_size
 
     def preprocess(self, routing_map: torch.Tensor) -> torch.Tensor:
         """
@@ -506,6 +510,10 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 - Number of tokens per expert.
         """
         # Preprocess: Get the metadata for communication, permutation and computation operations.
+        ncclrebuildutils.buildGroupB()
+        if ncclrebuildutils.needRebuild:
+            ncclrebuildutils.rebuild([0,1])
+            
         self.hidden_shape = hidden_states.shape
         self.probs = probs
         self.routing_map = routing_map
@@ -576,6 +584,35 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 )
 
         tokens_per_expert = self._maybe_dtoh_and_synchronize("before_finish", tokens_per_expert)
+                # 💡 只有rank 0读取 reload.flag，其余等它广播决定
+        
+
+        # if self.tp_rank == 0:
+        #     need_reload = int(os.path.exists("reload.flag"))
+        #     if need_reload:
+        #         os.remove("reload.flag")
+        # else:
+        #     need_reload = 0
+
+        # # 所有rank都使用rank 0的判断结果
+        # need_reload_tensor = torch.tensor([need_reload], device="cuda")
+        # torch.distributed.broadcast(need_reload_tensor, src=0)
+
+        # torch.distributed.barrier()
+
+        # if need_reload_tensor.item() == 1:
+        #     print(f"[Rank {self.tp_rank}] Reloading distributed group...")
+        #     cleanup()
+        #     params_data = {
+        #     'get_embedding_ranks': get_embedding_ranks,
+        #     'get_position_embedding_ranks': get_position_embedding_ranks,
+        # }
+        #     with open("/home/ubuntu/Codespace/serverless-moe/mixtral/REPLICATE/saved_objects/rank_0/initialize_distributed.pickle", 'rb') as f:
+        #         params_data = pickle.load(f)
+        #     get_embedding_ranks = params_data['get_embedding_ranks']
+        #     get_position_embedding_ranks = params_data['get_position_embedding_ranks']
+        #     _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks)
+        
 
         return global_input_tokens, tokens_per_expert
 
